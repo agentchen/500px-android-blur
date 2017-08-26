@@ -57,19 +57,23 @@ public class BlurringView extends View {
                 // the blurring canvas, which ensures that edges of the child views are blurred
                 // as well; otherwise we clear the blurring canvas with a transparent color.
                 if (mBlurredView.getBackground() != null && mBlurredView.getBackground() instanceof ColorDrawable) {
-                    mBitmapToBlur.eraseColor(((ColorDrawable) mBlurredView.getBackground()).getColor());
+                    mBitmapToBlurClip.eraseColor(((ColorDrawable) mBlurredView.getBackground()).getColor());
                 } else {
-                    mBitmapToBlur.eraseColor(Color.TRANSPARENT);
+                    mBitmapToBlurClip.eraseColor(Color.TRANSPARENT);
                 }
 
+                mBlurringCanvas.save();
+                mBlurringCanvas.translate(-getX(), -getY());
                 mBlurredView.draw(mBlurringCanvas);
+                mBlurringCanvas.restore();
+
                 blur();
 
                 canvas.save();
-                canvas.translate(mBlurredView.getX() - getX(), mBlurredView.getY() - getY());
                 canvas.scale(mDownsampleFactor, mDownsampleFactor);
-                canvas.drawBitmap(mBlurredBitmap, 0, 0, null);
+                canvas.drawBitmap(mBlurredBitmapClip, 0, 0, null);
                 canvas.restore();
+                mBitmapToBlurClip.eraseColor(Color.TRANSPARENT);
             }
             canvas.drawColor(mOverlayColor);
         }
@@ -100,42 +104,43 @@ public class BlurringView extends View {
     }
 
     protected boolean prepare() {
-        final int width = mBlurredView.getWidth();
-        final int height = mBlurredView.getHeight();
+        int scaledWidth = getWidth() / mDownsampleFactor;
+        int scaledHeight = getHeight() / mDownsampleFactor;
+        if (getWidth() % mDownsampleFactor != 0) {
+            scaledWidth += 1;
+        }
+        if (getHeight() % mDownsampleFactor != 0) {
+            scaledHeight += 1;
+        }
 
-        if (mBlurringCanvas == null || mDownsampleFactorChanged
-                || mBlurredViewWidth != width || mBlurredViewHeight != height) {
-            mDownsampleFactorChanged = false;
+        if (scaledWidth <= 0 || scaledHeight <= 0) {
+            return false;
+        }
 
-            mBlurredViewWidth = width;
-            mBlurredViewHeight = height;
+        boolean sizeChanged = false;
 
-            int scaledWidth = width / mDownsampleFactor;
-            int scaledHeight = height / mDownsampleFactor;
-
-            // The following manipulation is to avoid some RenderScript artifacts at the edge.
-            scaledWidth = scaledWidth - scaledWidth % 4 + 4;
-            scaledHeight = scaledHeight - scaledHeight % 4 + 4;
-
-            if (mBlurredBitmap == null
-                    || mBlurredBitmap.getWidth() != scaledWidth
-                    || mBlurredBitmap.getHeight() != scaledHeight) {
-                mBitmapToBlur = Bitmap.createBitmap(scaledWidth, scaledHeight,
-                        Bitmap.Config.ARGB_8888);
-                if (mBitmapToBlur == null) {
-                    return false;
-                }
-
-                mBlurredBitmap = Bitmap.createBitmap(scaledWidth, scaledHeight,
-                        Bitmap.Config.ARGB_8888);
-                if (mBlurredBitmap == null) {
-                    return false;
-                }
+        if (mBitmapToBlurClip == null || mBitmapToBlurClip.getWidth() != scaledWidth
+                || mBitmapToBlurClip.getHeight() != scaledHeight) {
+            mBitmapToBlurClip = Bitmap.createBitmap(scaledWidth, scaledHeight,
+                    Bitmap.Config.ARGB_8888);
+            if (mBitmapToBlurClip == null) {
+                return false;
             }
 
-            mBlurringCanvas = new Canvas(mBitmapToBlur);
+            mBlurredBitmapClip = Bitmap.createBitmap(scaledWidth, scaledHeight,
+                    Bitmap.Config.ARGB_8888);
+            if (mBlurredBitmapClip == null) {
+                return false;
+            }
+            sizeChanged = true;
+        }
+        if (mBlurringCanvas == null || mDownsampleFactorChanged || sizeChanged) {
+            mDownsampleFactorChanged = false;
+
+            mBlurringCanvas = new Canvas(mBitmapToBlurClip);
             mBlurringCanvas.scale(1f / mDownsampleFactor, 1f / mDownsampleFactor);
-            mBlurInput = Allocation.createFromBitmap(mRenderScript, mBitmapToBlur,
+
+            mBlurInput = Allocation.createFromBitmap(mRenderScript, mBitmapToBlurClip,
                     Allocation.MipmapControl.MIPMAP_NONE, Allocation.USAGE_SCRIPT);
             mBlurOutput = Allocation.createTyped(mRenderScript, mBlurInput.getType());
         }
@@ -143,10 +148,10 @@ public class BlurringView extends View {
     }
 
     protected void blur() {
-        mBlurInput.copyFrom(mBitmapToBlur);
+        mBlurInput.copyFrom(mBitmapToBlurClip);
         mBlurScript.setInput(mBlurInput);
         mBlurScript.forEach(mBlurOutput);
-        mBlurOutput.copyTo(mBlurredBitmap);
+        mBlurOutput.copyTo(mBlurredBitmapClip);
     }
 
     @Override
@@ -161,10 +166,9 @@ public class BlurringView extends View {
     private int mOverlayColor;
 
     private View mBlurredView;
-    private int mBlurredViewWidth, mBlurredViewHeight;
 
     private boolean mDownsampleFactorChanged;
-    private Bitmap mBitmapToBlur, mBlurredBitmap;
+    private Bitmap mBitmapToBlurClip, mBlurredBitmapClip;
     private Canvas mBlurringCanvas;
     private RenderScript mRenderScript;
     private ScriptIntrinsicBlur mBlurScript;
