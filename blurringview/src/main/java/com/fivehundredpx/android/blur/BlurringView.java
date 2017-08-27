@@ -63,7 +63,7 @@ public class BlurringView extends View {
                 }
 
                 mBlurringCanvas.save();
-                mBlurringCanvas.translate(-getX(), -getY());
+                mBlurringCanvas.translate(mBlurredView.getX() - getX(), mBlurredView.getY() - getY());
                 mBlurredView.draw(mBlurringCanvas);
                 mBlurringCanvas.restore();
 
